@@ -15,6 +15,11 @@ ALTER TABLE stations DROP CONSTRAINT IF EXISTS stations_status_check;
 ALTER TABLE stations ADD CONSTRAINT stations_status_check
     CHECK (status IS NULL OR status IN ('ACTIVE', 'INACTIVE', 'UNDER_MAINTENANCE', 'OPERATIONAL', 'Active', 'Inactive', 'Under Maintenance', 'Operational'));
 
+-- Ensure vehicles table has make, model, and battery_capacity_kwh
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS make VARCHAR(100);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS model VARCHAR(100);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS battery_capacity_kwh DECIMAL(6,2);
+
 
 -- ============================================================
 -- 1. STATES (1 record from state.csv)
