@@ -239,5 +239,13 @@ Expected output:
 - **Complete SQL Scripts**: 9 executable, production-ready SQL scripts in `database/`.
 - **Predefined EV Dataset**: Original CSV files preserved in `data/`.
 - **Architectural Documentation**: 6 detailed Markdown reports in `documentation/`.
+
+- ### ER Diagram
+
+[Click here to view ER Diagram](database/EV_ER_Diagram_Revised_v3.png)
+
+### Relational Schema
+
+[Click here to view Relational Schema](database/EV_Relational_Schema_Revised_v3.pdf)
 - **Transaction Safety**: Verified protection against race conditions and double bookings.
 
