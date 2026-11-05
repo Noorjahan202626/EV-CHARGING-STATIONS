@@ -244,6 +244,9 @@ Expected output:
 [Click here to view ER Diagram](database/EV_ER_Diagram_Revised_v3.png)
 
 
+
+
+
 ### Relational Schema
 
 [Click here to view Relational Schema](database/EV_Relational_Schema_Revised_v3.pdf)
