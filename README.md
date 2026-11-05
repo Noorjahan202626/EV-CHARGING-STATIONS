@@ -132,86 +132,14 @@ The database incorporates genuine infrastructure data from Karnataka, India:
 
 ---
 
-## 7. Concurrency Control & Double-Booking Prevention
 
-### The Problem:
-If two drivers simultaneously attempt to reserve Charger Bay `P001` for overlapping time slots (e.g. 09:00–10:30 and 09:30–11:00), application-level checks can fail due to race conditions.
 
-### The Solution: Engine-Level Exclusion Constraint
-In `03_constraints.sql`, PostgreSQL's GiST exclusion constraint guarantees atomicity:
-```sql
-ALTER TABLE reservations
-    ADD CONSTRAINT excl_no_charger_overlap
-    EXCLUDE USING gist (
-        charger_id WITH =,
-        tstzrange(slot_start, slot_end, '[)') WITH &&
-    )
-    WHERE (status IN ('CONFIRMED', 'ACTIVE') AND charger_id IS NOT NULL);
-```
 
-### How to Test Concurrent Bookings in pgAdmin 4:
-1. Open **two separate Query Tool windows** in pgAdmin 4.
-2. In **Session 1**, lock Charger 2:
-   ```sql
-   BEGIN;
-   SELECT * FROM chargers WHERE charger_id = 2 FOR UPDATE;
-   ```
-3. In **Session 2**, attempt to lock the same charger:
-   ```sql
-   BEGIN;
-   SELECT * FROM chargers WHERE charger_id = 2 FOR UPDATE;
-   -- Session 2 hangs, waiting for Session 1 to finish.
-   ```
-4. Back in **Session 1**, insert a confirmed reservation and commit:
-   ```sql
-   INSERT INTO reservations (vehicle_id, charger_id, slot_start, slot_end, booking_code, status)
-   VALUES (1, 2, '2026-12-01 14:00+05:30', '2026-12-01 15:00+05:30', 'BK-SESS-1', 'CONFIRMED');
-   COMMIT;
-   ```
-5. **Session 2** immediately unblocks. Attempt to book an overlapping interval:
-   ```sql
-   INSERT INTO reservations (vehicle_id, charger_id, slot_start, slot_end, booking_code, status)
-   VALUES (3, 2, '2026-12-01 14:30+05:30', '2026-12-01 15:30+05:30', 'BK-SESS-2', 'CONFIRMED');
-   -- ERROR: conflicting key value violates exclusion constraint "excl_no_charger_overlap"
-   ROLLBACK;
-   ```
 
 ---
 
-## 8. Step-by-Step Execution Guide (pgAdmin 4)
 
-### Step 1: Connect & Create the Database
-1. Open **pgAdmin 4** and connect to your PostgreSQL server.
-2. Open the **Query Tool** on the default `postgres` database.
-3. Open and run **`01_create_database.sql`**:
-   ```sql
-   CREATE DATABASE ev_charging_orchestrator;
-   ```
-4. Disconnect from `postgres` and connect to the newly created **`ev_charging_orchestrator`** database.
-5. In the new Query Tool, enable the required extensions:
-   ```sql
-   CREATE EXTENSION IF NOT EXISTS btree_gist;
-   CREATE EXTENSION IF NOT EXISTS pgcrypto;
-   ```
-
-### Step 2: Execute SQL Scripts in Exact Order
-Run each file in the `database/` folder sequentially:
-
-| Order | Script File | Purpose | Execution Time |
-|:---:|---|---|:---:|
-| **1** | `01_create_database.sql` | Creates database and initializes extensions | ~1 sec |
-| **2** | `02_create_tables.sql` | Creates all 16 tables and synonym views | ~1 sec |
-| **3** | `03_constraints.sql` | Adds exclusion constraint and check validations | ~1 sec |
-| **4** | `04_indexes.sql` | Creates performance B-tree and GiST range indexes | ~1 sec |
-| **5** | `05_normalization_views.sql` | Creates the 3NF views (`cost`, `priority`, `charger_connector`) | ~1 sec |
-| **6** | `06_import_ev_dataset.sql` | Loads all 15,027 predefined records and test dataset | ~4-6 secs |
-| **7** | `07_transaction_logic.sql` | Demonstrates safe booking, check-in, and session commits | ~1 sec |
-| **8** | `08_test_cases.sql` | Runs automated constraint and verification test suite | ~2 secs |
-| **9** | `09_useful_queries.sql` | Executes the 20 analytical and operational queries | ~2 secs |
-
----
-
-## 9. Verification & Analytical Queries
+## 7. Verification & Analytical Queries
 
 To verify table counts after running `06_import_ev_dataset.sql`:
 ```sql
