@@ -243,12 +243,15 @@ Expected output:
 - ### ER Diagram
 [Click here to view ER Diagram](database/EV_ER_Diagram_Revised_v3.png)
 
-
-
-
-
 ### Relational Schema
 
 [Click here to view Relational Schema](database/EV_Relational_Schema_Revised_v3.pdf)
+
+### State diagram
+
+[Click here to view State Diagram](database/State_Diagram.jpeg)
+### Activity Diagram 
+
+[Click here to view Activity Diagram](database/EV_Activity_Diagram_Final%20(2).png)
 - **Transaction Safety**: Verified protection against race conditions and double bookings.
 
