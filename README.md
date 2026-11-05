@@ -242,7 +242,8 @@ Expected output:
 
 - ### ER Diagram
 
-[Click here to view ER Diagram](database/EV_ER_Diagram_Revised_v3.png)
+[Click here to view ER Diagram]https://github.com/Noorjahan202626/EV-CHARGING-STATIONS/blob/26278d0fc2d59a0a6954c8f9280223355e3d1a54/database/EV_ER_Diagram_Revised_v3.png
+
 
 ### Relational Schema
 
