@@ -93,30 +93,35 @@ Both closures contain all attributes.
 
 ## 2.3 STATION
 
-**Attributes (as represented in the ER diagram):**
+**Attributes:**
 
-`STATION(station_id, source_id, name, address, town_id, state_id, postcode, latitude, longitude, usage_type, tariff_per_kwh, status, network_id)`
+`STATION(station_id, name, address, town_id, state_id, postcode, latitude, longitude, usage_type, tariff_per_kwh, status, network_id)`
 
 **Functional Dependencies:**
 
-1. `station_id → source_id, name, address, town_id, state_id, postcode, latitude, longitude, usage_type, tariff_per_kwh, status, network_id`
-2. `source_id → station_id, name, address, town_id, state_id, postcode, latitude, longitude, usage_type, tariff_per_kwh, status, network_id` (when source_id is NOT NULL and unique)
+1. `station_id → name, address, town_id, state_id, postcode, latitude, longitude, usage_type, tariff_per_kwh, status, network_id`
 
-**Candidate Keys:**
+**Candidate Key:**
 
 - `station_id` (Primary Key)
-- `source_id` (Conditional alternate identifier; UNIQUE and nullable)
 
 **Attribute Closure:**
 
-`station_id+ = {all attributes of STATION}`
+Starting with:
 
-`source_id+ = {all attributes of STATION}` for non-NULL source IDs.
+`station_id+ = {station_id}`
 
-**BCNF Verification:** Satisfied based on the declared dependencies. The nullable UNIQUE column is not a formal candidate key for the entire relation unless its NULL behavior is restricted appropriately.
+Using the functional dependency:
 
----
+`station_id → name, address, town_id, state_id, postcode, latitude, longitude, usage_type, tariff_per_kwh, status, network_id`
 
+Therefore:
+
+`station_id+ = {station_id, name, address, town_id, state_id, postcode, latitude, longitude, usage_type, tariff_per_kwh, status, network_id}`
+
+The closure contains all 12 attributes of STATION.
+
+**BCNF Verification:** Satisfied. The determinant `station_id` is a candidate key and determines every other attribute in the relation.
 ## 2.4 CHARGER
 
 **Attributes:**
