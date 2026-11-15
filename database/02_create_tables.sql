@@ -226,10 +226,6 @@ COMMENT ON COLUMN operators.station_id IS 'Foreign key referencing managed stati
 CREATE TABLE vehicles (
     vehicle_id           SERIAL       PRIMARY KEY,
     registration_no      VARCHAR(15)  UNIQUE,       -- unique when provided, nullable
-    make                 VARCHAR(100),
-    model                VARCHAR(100),
-    battery_capacity_kwh DECIMAL(6,2)
-        CHECK (battery_capacity_kwh > 0),
     user_id              INT          NOT NULL
         REFERENCES users (user_id) ON DELETE CASCADE ON UPDATE CASCADE,
     category_id          INT          NOT NULL
