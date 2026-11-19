@@ -1,0 +1,12 @@
+/* Dashboard layout styles */
+.dashboard-root {
+  display: flex;
+  min-height: 100vh;
+  background-color: #F5F8F6; /* mint green background */
+}
+.dashboard-main {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+}
+/* Ensure the main content scrolls while sidebar stays fixed */

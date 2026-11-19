@@ -1,0 +1,8 @@
+connector_type_id,code,description,current_type
+1,CCS2,Combined Charging System Type 2 (DC fast),DC
+2,CHADEMO,CHAdeMO DC fast connector,DC
+3,TYPE2_AC,IEC 62196 Type 2 (AC),AC
+4,BHARAT_AC001,"Bharat AC-001 (low-power AC, IS 17017)",AC
+5,BHARAT_DC001,"Bharat DC-001 (low-voltage DC, IS 17017)",DC
+6,LEV_AC,Light Electric Vehicle AC connector (2W/3W),AC
+7,LEV_DC,"Light Electric Vehicle DC connector (IS 17017-2-6, 2W/3W)",DC

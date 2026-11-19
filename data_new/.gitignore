@@ -1,0 +1,44 @@
+# General ignore rules for the project
+# Node modules
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Build artefacts
+frontend/dist/
+frontend/build/
+backend/dist/
+backend/build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editor files
+.idea/
+.vscode/
+*.suo
+*.user
+*.swp
+
+# Environment files – never commit secrets
+.env
+backend/.env
+frontend/.env
+
+# Optional: test coverage
+coverage/
+
+# Misc
+*.local
+
+# Environment files - never commit secrets
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env

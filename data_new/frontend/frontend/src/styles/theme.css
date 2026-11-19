@@ -1,0 +1,111 @@
+/* ==========================================================
+   EV Charge Network – design system (tokens + shared UI)
+   Loaded once in main.jsx, after Bootstrap.
+   ========================================================== */
+:root {
+  /* brand */
+  --ev-primary: #047857;
+  --ev-primary-600: #065f46;
+  --ev-primary-900: #064e3b;
+  --ev-accent: #10b981;
+  --ev-accent-soft: #d1fae5;
+  /* surfaces */
+  --ev-bg: #f5faf7;
+  --ev-surface: #ffffff;
+  --ev-border: #e2ece6;
+  /* text */
+  --ev-text: #12201b;
+  --ev-muted: #5a6f66;
+  /* status */
+  --ev-success: #12936b;
+  --ev-warning: #c98a0b;
+  --ev-danger: #c8453d;
+  /* shape */
+  --ev-radius-sm: 10px;
+  --ev-radius: 16px;
+  --ev-radius-lg: 24px;
+  --ev-shadow-sm: 0 1px 2px rgba(6, 78, 59, .06);
+  --ev-shadow: 0 8px 24px -8px rgba(6, 78, 59, .14), 0 2px 6px rgba(6, 78, 59, .05);
+  --ev-shadow-lg: 0 24px 48px -16px rgba(6, 78, 59, .22);
+  --ev-gradient: linear-gradient(135deg, #047857 0%, #059669 100%);
+  --ev-font: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --ev-font-display: "Manrope", "Inter", "Segoe UI", system-ui, sans-serif;
+  --ev-nav-h: 72px;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--ev-bg);
+  color: var(--ev-text);
+  font-family: var(--ev-font);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+h1, h2, h3, h4, h5, h6 { font-family: var(--ev-font-display); letter-spacing: -.02em; color: var(--ev-primary-900); }
+section[id] { scroll-margin-top: calc(var(--ev-nav-h) + 8px); }
+a { color: var(--ev-primary); }
+
+/* focus ring everywhere */
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--ev-accent) 55%, transparent); outline-offset: 2px; border-radius: 6px; }
+
+/* ---------- buttons ---------- */
+.btn-ev, .btn-ev-outline, .btn-ev-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  font-weight: 600; font-size: .95rem; line-height: 1;
+  padding: .8rem 1.35rem; border-radius: 12px; border: 1.5px solid transparent;
+  text-decoration: none; cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease, color .15s ease, border-color .15s ease;
+}
+.btn-ev { background: var(--ev-gradient); color: #fff; box-shadow: 0 6px 16px -6px rgba(4, 120, 87, .5); }
+.btn-ev:hover { color: #fff; transform: translateY(-1px); box-shadow: 0 10px 22px -8px rgba(4, 120, 87, .55); }
+.btn-ev-outline { background: #fff; color: var(--ev-primary); border-color: var(--ev-border); }
+.btn-ev-outline:hover { color: var(--ev-primary); border-color: var(--ev-primary); background: var(--ev-accent-soft); }
+.btn-ev-ghost { background: transparent; color: #fff; border-color: rgba(255, 255, 255, .35); }
+.btn-ev-ghost:hover { color: #fff; background: rgba(255, 255, 255, .1); }
+.btn-ev-lg { padding: 1rem 1.7rem; font-size: 1rem; border-radius: 14px; }
+.btn-ev:disabled { opacity: .6; transform: none; cursor: not-allowed; }
+
+/* ---------- cards / badges ---------- */
+.ev-card {
+  background: var(--ev-surface); border: 1px solid var(--ev-border);
+  border-radius: var(--ev-radius); box-shadow: var(--ev-shadow-sm);
+  transition: box-shadow .2s ease, transform .2s ease, border-color .2s ease;
+}
+.ev-card.hoverable:hover { box-shadow: var(--ev-shadow); transform: translateY(-3px); border-color: #cfe0df; }
+
+.ev-badge {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .75rem; font-weight: 600; padding: .3rem .7rem; border-radius: 999px;
+  background: var(--ev-accent-soft); color: var(--ev-primary);
+}
+.ev-badge.success { background: #dcf5ec; color: var(--ev-success); }
+.ev-badge.warning { background: #fbf0d7; color: var(--ev-warning); }
+.ev-badge.danger  { background: #fbe4e2; color: var(--ev-danger); }
+
+.ev-icon {
+  width: 48px; height: 48px; flex: none; display: grid; place-items: center;
+  border-radius: 14px; font-size: 1.4rem; color: var(--ev-primary);
+  background: var(--ev-accent-soft);
+}
+
+/* ---------- empty / loading states (reusable) ---------- */
+.ev-skeleton { display: inline-block; min-width: 3ch; border-radius: 6px; background: linear-gradient(90deg, #e6eeee 25%, #f3f7f7 50%, #e6eeee 75%); background-size: 200% 100%; animation: ev-shimmer 1.2s infinite; color: transparent !important; }
+@keyframes ev-shimmer { to { background-position: -200% 0; } }
+.ev-empty { text-align: center; padding: 2.5rem 1rem; color: var(--ev-muted); }
+.ev-empty i { font-size: 2rem; color: var(--ev-accent); display: block; margin-bottom: .5rem; }
+
+/* ---------- forms ---------- */
+.ev-label { font-size: .85rem; font-weight: 600; color: var(--ev-text); margin-bottom: .35rem; }
+.ev-input {
+  width: 100%; padding: .8rem 1rem; font-size: .95rem; color: var(--ev-text);
+  background: #fff; border: 1.5px solid var(--ev-border); border-radius: 12px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.ev-input:focus { outline: none; border-color: var(--ev-accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ev-accent) 20%, transparent); }
+.ev-input.invalid { border-color: var(--ev-danger); }
+.ev-error { color: var(--ev-danger); font-size: .8rem; margin-top: .3rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

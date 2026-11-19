@@ -1,0 +1,17 @@
+.auth-page { min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; }
+.auth-aside { position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; padding: 2.5rem 3rem; color: #fff; background: var(--ev-gradient); }
+.auth-aside::after { content: ""; position: absolute; width: 480px; height: 480px; right: -160px; bottom: -180px; border-radius: 50%; background: radial-gradient(circle, rgba(20, 201, 189, .4), transparent 70%); }
+.auth-aside h2 { color: #fff; font-size: clamp(1.8rem, 3vw, 2.5rem); font-weight: 800; line-height: 1.15; max-width: 24rem; }
+.auth-aside p { color: rgba(255, 255, 255, .78); max-width: 26rem; }
+.auth-aside ul { list-style: none; padding: 0; margin: 1.5rem 0 0; display: grid; gap: .7rem; position: relative; z-index: 1; }
+.auth-aside li i { color: var(--ev-accent); margin-right: .6rem; }
+.auth-main { display: grid; place-items: center; padding: 2rem 1.25rem; }
+.auth-card { width: 100%; max-width: 430px; }
+.auth-card h1 { font-size: 1.7rem; font-weight: 800; margin-bottom: .4rem; }
+.auth-sub { color: var(--ev-muted); margin-bottom: 1.8rem; }
+.auth-form { display: grid; gap: 1.1rem; }
+.auth-foot { text-align: center; color: var(--ev-muted); font-size: .92rem; margin-top: 1.4rem; }
+.auth-foot a { font-weight: 600; text-decoration: none; }
+.auth-notice { display: flex; gap: .6rem; padding: .85rem 1rem; border-radius: 12px; font-size: .88rem; background: #fbf0d7; color: #7a5506; }
+.auth-back { color: var(--ev-muted); text-decoration: none; font-size: .9rem; display: inline-flex; gap: .4rem; align-items: center; margin-bottom: 1.5rem; }
+@media (max-width: 899.98px) { .auth-page { grid-template-columns: 1fr; } .auth-aside { display: none; } }

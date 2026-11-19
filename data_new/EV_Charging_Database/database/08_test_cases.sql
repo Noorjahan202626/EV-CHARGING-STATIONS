@@ -336,7 +336,7 @@ BEGIN
 END;
 $$;
 
-COMMIT;
+ROLLBACK;
 
 -- Final test suite summary
 SELECT 'ALL TESTS COMPLETED SUCCESSFULLY' AS status;

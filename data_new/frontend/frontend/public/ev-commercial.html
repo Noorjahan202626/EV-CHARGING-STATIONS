@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Ultra-Fast EV Charging Simulation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Import Map for Three.js & Post-Processing -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #06080c;
+      font-family: 'Inter', sans-serif;
+      color: #f8fafc;
+    }
+    #canvas-container {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .font-display {
+      font-family: 'Space Grotesk', sans-serif;
+    }
+    /* Subtle film grain & vignette overlay */
+    .cinema-vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 2;
+      background: radial-gradient(circle at 50% 50%, transparent 58%, rgba(3, 5, 9, 0.65) 100%);
+    }
+
+    /* Custom subtle glassmorphism */
+    .glass-panel {
+      background: rgba(10, 14, 22, 0.65);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .glass-pill {
+      background: rgba(14, 20, 30, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      transition: all 0.25s ease;
+    }
+    .glass-pill:hover {
+      background: rgba(25, 36, 52, 0.85);
+      border-color: rgba(52, 211, 153, 0.4);
+    }
+    .glass-pill.active {
+      background: rgba(16, 185, 129, 0.22);
+      border-color: rgba(52, 211, 153, 0.65);
+      color: #6ee7b7;
+    }
+
+    /* Custom range slider for timeline scrubbing */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      height: 3px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 999px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 12px;
+      width: 12px;
+      border-radius: 50%;
+      background: #34d399;
+      margin-top: -4.5px;
+      box-shadow: 0 0 10px rgba(52, 211, 153, 0.8);
+      transition: transform 0.15s ease;
+    }
+    input[type=range]::-webkit-slider-thumb:hover {
+      transform: scale(1.25);
+    }
+  </style>
+</head>
+<body>
+  <!-- 3D WebGL Canvas -->
+  <div id="canvas-container"></div>
+  <div class="cinema-vignette"></div>
+
+  <!-- Loading Curtain -->
+  <div id="loader" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#04060a] transition-opacity duration-700">
+    <div class="flex items-center gap-2 mb-2">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+      <span class="font-display tracking-[0.2em] text-xs uppercase text-slate-300">Loading 3D Visual</span>
+    </div>
+    <div class="w-40 h-[2px] bg-slate-800 rounded-full overflow-hidden">
+      <div id="loader-bar" class="h-full bg-gradient-to-r from-sky-400 to-emerald-400 w-0 transition-all duration-300"></div>
+    </div>
+  </div>
+
+  <!-- Header Controls -->
+  <header class="absolute top-3 left-3 right-3 z-10 flex items-center justify-between pointer-events-none">
+    <div class="flex items-center gap-2 pointer-events-auto">
+      <div class="w-6 h-6 rounded-md bg-emerald-400/20 border border-emerald-400/40 flex items-center justify-center">
+        <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg>
+      </div>
+      <div>
+        <div class="font-display font-semibold tracking-wider text-xs text-white">LIVE CHARGING SIMULATION</div>
+      </div>
+    </div>
+
+    <!-- Camera & Play Controls -->
+    <div class="flex items-center gap-1.5 pointer-events-auto">
+      <button id="btn-cam-mode" class="glass-pill active px-2.5 py-1 rounded-full text-[11px] font-medium tracking-wide flex items-center gap-1.5" title="Director Cut vs Free Orbit">
+        <span id="cam-dot" class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span id="cam-label">Director</span>
+      </button>
+      <button id="btn-replay" class="glass-pill px-2 py-1 rounded-full text-[11px] font-medium tracking-wide text-slate-200 flex items-center gap-1" title="Replay">
+        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Narrative Overlay & Telemetry HUD -->
+  <div class="absolute bottom-12 left-3 right-3 z-10 pointer-events-none flex items-end justify-between gap-3">
+    <div id="narrative-box" class="max-w-xs transition-opacity duration-500">
+      <div id="chapter-tag" class="inline-flex items-center gap-1.5 text-[10px] font-medium tracking-[0.2em] uppercase text-emerald-400 mb-0.5">
+        <span class="w-3 h-[1px] bg-emerald-400/70"></span>
+        <span id="chapter-step">01 // ARRIVAL</span>
+      </div>
+      <h2 id="chapter-title" class="font-display text-base font-semibold text-white leading-tight mb-0.5">
+        Effortless Approach.
+      </h2>
+      <p id="chapter-desc" class="text-[11px] text-slate-300/90 font-light leading-snug line-clamp-2">
+        Precision optical guidance welcomes the EV into an ultra-low-latency 350kW bay.
+      </p>
+    </div>
+
+    <!-- Telemetry Card -->
+    <div id="telemetry-card" class="glass-panel rounded-xl p-2.5 w-44 transition-all duration-500 opacity-0 translate-y-2 pointer-events-auto">
+      <div class="flex items-center justify-between text-[10px] uppercase tracking-wider text-slate-400 mb-1">
+        <span id="telem-status" class="flex items-center gap-1 text-slate-300 font-medium">
+          <span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span> Standby
+        </span>
+        <span class="font-mono text-emerald-400 text-[10px]">BAY 02</span>
+      </div>
+      <div class="flex items-baseline justify-between mb-1">
+        <div>
+          <span id="telem-soc" class="font-display text-lg font-semibold text-white tabular-nums">42</span>
+          <span class="text-[10px] text-slate-400">%</span>
+        </div>
+        <div class="text-right">
+          <span id="telem-kw" class="font-display text-sm font-medium text-emerald-400 tabular-nums">0</span>
+          <span class="text-[9px] text-slate-400">kW</span>
+        </div>
+      </div>
+      <div class="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+        <div id="telem-bar" class="h-full bg-gradient-to-r from-sky-400 via-emerald-400 to-teal-300 transition-all duration-150" style="width: 42%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline Scrubber -->
+  <div class="absolute bottom-2.5 left-3 right-3 z-10 flex items-center gap-2">
+    <button id="btn-play-pause" class="w-6 h-6 rounded-full glass-pill flex items-center justify-center text-white shrink-0" aria-label="Play or Pause">
+      <svg id="icon-pause" class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+        <rect x="6" y="4" width="4" height="16" rx="1" />
+        <rect x="14" y="4" width="4" height="16" rx="1" />
+      </svg>
+      <svg id="icon-play" class="w-3 h-3 hidden ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M8 5v14l11-7z" />
+      </svg>
+    </button>
+    <input id="timeline-scrubber" type="range" min="0" max="1000" value="0" class="w-full" />
+  </div>
+
+  <!-- Three.js Engine Script -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+    const container = document.getElementById('canvas-container');
+    const width = container.clientWidth || window.innerWidth;
+    const height = container.clientHeight || window.innerHeight;
+
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: 'high-performance',
+      stencil: false
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(width, height);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.08;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#070b12');
+    scene.fog = new THREE.FogExp2('#070b12', 0.016);
+
+    const camera = new THREE.PerspectiveCamera(36, width / height, 0.1, 180);
+    camera.position.set(13, 3.2, 16);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.maxPolarAngle = Math.PI * 0.485;
+    controls.minDistance = 2.8;
+    controls.maxDistance = 32;
+    controls.enabled = false;
+
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    const roomEnv = new RoomEnvironment();
+    const envRT = pmremGenerator.fromScene(roomEnv, 0.04);
+    scene.environment = envRT.texture;
+    roomEnv.dispose();
+
+    const composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
+
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.38, 0.65, 0.86);
+    composer.addPass(bloomPass);
+
+    const outputPass = new OutputPass();
+    composer.addPass(outputPass);
+
+    // Procedural PBR Textures
+    function createAsphaltTextures() {
+      const size = 512;
+      const colorCanvas = document.createElement('canvas');
+      colorCanvas.width = size; colorCanvas.height = size;
+      const ctx = colorCanvas.getContext('2d');
+      const roughCanvas = document.createElement('canvas');
+      roughCanvas.width = size; roughCanvas.height = size;
+      const rCtx = roughCanvas.getContext('2d');
+
+      ctx.fillStyle = '#141820';
+      ctx.fillRect(0, 0, size, size);
+      rCtx.fillStyle = '#6e6e6e';
+      rCtx.fillRect(0, 0, size, size);
+
+      const imgData = ctx.getImageData(0, 0, size, size);
+      const rData = rCtx.getImageData(0, 0, size, size);
+      for (let i = 0; i < imgData.data.length; i += 4) {
+        const grain = (Math.random() - 0.5) * 26;
+        imgData.data[i] = Math.max(8, Math.min(48, 20 + grain));
+        imgData.data[i + 1] = Math.max(10, Math.min(54, 24 + grain));
+        imgData.data[i + 2] = Math.max(14, Math.min(64, 32 + grain));
+        rData.data[i] = rData.data[i + 1] = rData.data[i + 2] = Math.max(45, Math.min(185, 110 + (Math.random() - 0.5) * 45));
+      }
+      ctx.putImageData(imgData, 0, 0);
+      rCtx.putImageData(rData, 0, 0);
+
+      const map = new THREE.CanvasTexture(colorCanvas);
+      map.wrapS = map.wrapT = THREE.RepeatWrapping;
+      map.repeat.set(12, 12);
+      map.colorSpace = THREE.SRGBColorSpace;
+
+      const roughnessMap = new THREE.CanvasTexture(roughCanvas);
+      roughnessMap.wrapS = roughnessMap.wrapT = THREE.RepeatWrapping;
+      roughnessMap.repeat.set(12, 12);
+
+      return { map, roughnessMap };
+    }
+
+    function createChargerScreenTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 410;
+      const ctx = canvas.getContext('2d');
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+
+      function update(state, soc, kw) {
+        ctx.fillStyle = '#060a10';
+        ctx.fillRect(0, 0, 256, 410);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '600 13px Inter, sans-serif';
+        ctx.fillText('AETHER // HYPERCHARGE', 20, 36);
+
+        ctx.fillStyle = state === 'CHARGING' ? '#34d399' : '#38bdf8';
+        ctx.beginPath(); ctx.arc(230, 32, 5, 0, Math.PI * 2); ctx.fill();
+
+        const cx = 128, cy = 165, radius = 74;
+        ctx.lineWidth = 9;
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke();
+
+        const startAngle = -Math.PI / 2;
+        const endAngle = startAngle + (Math.PI * 2 * (soc / 100));
+        ctx.strokeStyle = '#34d399';
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.arc(cx, cy, radius, startAngle, endAngle); ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.font = '700 44px "Space Grotesk", sans-serif';
+        ctx.fillText(`${Math.round(soc)}%`, cx, cy + 12);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '500 11px Inter, sans-serif';
+        ctx.fillText(state, cx, cy + 34);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.04)';
+        ctx.beginPath(); ctx.roundRect(20, 275, 216, 100, 12); ctx.fill();
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#64748b';
+        ctx.font = '600 10px Inter, sans-serif';
+        ctx.fillText('DELIVERY RATE', 34, 305);
+
+        ctx.fillStyle = '#34d399';
+        ctx.font = '700 32px "Space Grotesk", sans-serif';
+        ctx.fillText(`${Math.round(kw)} kW`, 34, 344);
+
+        texture.needsUpdate = true;
+      }
+
+      update('BAY READY', 42, 0);
+      return { texture, update };
+    }
+
+    // Lights
+    const hemiLight = new THREE.HemisphereLight('#7dd3fc', '#1e293b', 0.55);
+    scene.add(hemiLight);
+
+    const sunLight = new THREE.DirectionalLight('#ffd8a8', 2.4);
+    sunLight.position.set(-24, 14, -18);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.set(1024, 1024);
+    sunLight.shadow.bias = -0.0004;
+    scene.add(sunLight);
+
+    const rimFill = new THREE.DirectionalLight('#38bdf8', 0.85);
+    rimFill.position.set(22, 9, 16);
+    scene.add(rimFill);
+
+    const bayLight2 = new THREE.SpotLight('#f8fafc', 45, 18, Math.PI * 0.36, 0.65, 1.5);
+    bayLight2.position.set(0, 5.1, 0);
+    bayLight2.target.position.set(0, 0, 0);
+    bayLight2.castShadow = true;
+    scene.add(bayLight2, bayLight2.target);
+
+    // Station Hub
+    const stationGroup = new THREE.Group();
+    scene.add(stationGroup);
+
+    const asphalt = createAsphaltTextures();
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(100, 100),
+      new THREE.MeshStandardMaterial({ map: asphalt.map, roughnessMap: asphalt.roughnessMap, roughness: 0.72, metalness: 0.12 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    stationGroup.add(ground);
+
+    const concreteMat = new THREE.MeshStandardMaterial({ color: '#2a303c', roughness: 0.85 });
+    const darkAnodizedMat = new THREE.MeshStandardMaterial({ color: '#11161f', roughness: 0.32, metalness: 0.85 });
+    const brushedSteelMat = new THREE.MeshStandardMaterial({ color: '#cbd5e1', roughness: 0.25, metalness: 0.92 });
+    const warmWoodMat = new THREE.MeshStandardMaterial({ color: '#5c3d28', roughness: 0.65 });
+
+    const islandMesh = new THREE.Mesh(new THREE.BoxGeometry(16.5, 0.16, 2.4), concreteMat);
+    islandMesh.position.set(0, 0.08, -4.4);
+    islandMesh.receiveShadow = true;
+    stationGroup.add(islandMesh);
+
+    const bayGuideMaterials = [];
+    [-4.5, 0, 4.5].forEach((bx, idx) => {
+      const lineMat = new THREE.MeshBasicMaterial({ color: '#475569' });
+      const leftLine = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 5.4), lineMat);
+      leftLine.rotation.x = -Math.PI / 2;
+      leftLine.position.set(bx - 1.65, 0.005, -0.3);
+      stationGroup.add(leftLine);
+
+      const rightLine = new THREE.Mesh(new THREE.PlaneGeometry(0.08, 5.4), lineMat);
+      rightLine.rotation.x = -Math.PI / 2;
+      rightLine.position.set(bx + 1.65, 0.005, -0.3);
+      stationGroup.add(rightLine);
+
+      const isHeroBay = idx === 1;
+      const stripMat = new THREE.MeshStandardMaterial({
+        color: '#0f172a',
+        emissive: new THREE.Color(isHeroBay ? '#38bdf8' : '#10b981'),
+        emissiveIntensity: isHeroBay ? 1.4 : 0.7
+      });
+      bayGuideMaterials.push(stripMat);
+
+      const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 4.4), stripMat);
+      strip.rotation.x = -Math.PI / 2;
+      strip.position.set(bx, 0.006, 0.1);
+      stationGroup.add(strip);
+    });
+
+    // Canopy
+    const canopyGroup = new THREE.Group();
+    stationGroup.add(canopyGroup);
+
+    [-5.8, 5.8].forEach((px) => {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.55, 5.4, 0.85), darkAnodizedMat);
+      pillar.position.set(px, 2.7, -4.4);
+      pillar.castShadow = true;
+      canopyGroup.add(pillar);
+    });
+
+    const roofOuter = new THREE.Mesh(new THREE.BoxGeometry(17.4, 0.42, 7.6), darkAnodizedMat);
+    roofOuter.position.set(0, 5.45, -1.6);
+    canopyGroup.add(roofOuter);
+
+    const soffit = new THREE.Mesh(new THREE.BoxGeometry(16.6, 0.08, 6.8), warmWoodMat);
+    soffit.position.set(0, 5.22, -1.6);
+    canopyGroup.add(soffit);
+
+    // Pedestals
+    const screenController = createChargerScreenTexture();
+    const chargerHaloMaterials = [];
+
+    function buildChargerPedestal(xPos, isHero) {
+      const ped = new THREE.Group();
+      ped.position.set(xPos, 0.16, -3.75);
+
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.62, 2.25, 0.34), darkAnodizedMat);
+      body.position.y = 1.125;
+      body.castShadow = true;
+      ped.add(body);
+
+      const haloMat = new THREE.MeshStandardMaterial({
+        color: '#0f172a',
+        emissive: new THREE.Color(isHero ? '#38bdf8' : '#10b981'),
+        emissiveIntensity: 2.0
+      });
+      chargerHaloMaterials.push(haloMat);
+      const halo = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.06, 0.36), haloMat);
+      halo.position.y = 2.18;
+      ped.add(halo);
+
+      const screenMat = isHero
+        ? new THREE.MeshStandardMaterial({
+            map: screenController.texture,
+            emissiveMap: screenController.texture,
+            emissive: new THREE.Color('#ffffff'),
+            emissiveIntensity: 0.85
+          })
+        : new THREE.MeshStandardMaterial({
+            color: '#09111e',
+            emissive: new THREE.Color('#0ea5e9'),
+            emissiveIntensity: 0.25
+          });
+
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.68), screenMat);
+      screen.position.set(0, 1.48, 0.173);
+      ped.add(screen);
+
+      stationGroup.add(ped);
+      return ped;
+    }
+
+    buildChargerPedestal(-4.5, false);
+    buildChargerPedestal(0, true);
+    buildChargerPedestal(4.5, false);
+
+    // Sculpted Car
+    const carRoot = new THREE.Group();
+    scene.add(carRoot);
+
+    const carBodyGroup = new THREE.Group();
+    carRoot.add(carBodyGroup);
+
+    const carPaintMat = new THREE.MeshPhysicalMaterial({
+      color: '#465161',
+      metalness: 0.86,
+      roughness: 0.18,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.04
+    });
+
+    const carGlassMat = new THREE.MeshPhysicalMaterial({
+      color: '#090d14',
+      metalness: 0.1,
+      roughness: 0.05,
+      transmission: 0.55,
+      transparent: true,
+      opacity: 0.92
+    });
+
+    const glossBlackTrimMat = new THREE.MeshStandardMaterial({ color: '#0a0d12', metalness: 0.4, roughness: 0.14 });
+
+    const bodyShape = new THREE.Shape();
+    bodyShape.moveTo(-2.32, 0.24);
+    bodyShape.lineTo(-2.36, 0.46);
+    bodyShape.quadraticCurveTo(-2.22, 0.72, -1.55, 0.79);
+    bodyShape.lineTo(-0.78, 0.86);
+    bodyShape.lineTo(1.45, 0.92);
+    bodyShape.quadraticCurveTo(2.15, 0.93, 2.34, 0.78);
+    bodyShape.lineTo(2.38, 0.42);
+    bodyShape.lineTo(2.22, 0.22);
+    bodyShape.lineTo(-2.32, 0.22);
+
+    const lowerBodyGeo = new THREE.ExtrudeGeometry(bodyShape, { steps: 1, depth: 1.76, bevelEnabled: true, bevelThickness: 0.14, bevelSize: 0.09, bevelSegments: 6 });
+    lowerBodyGeo.translate(0, 0, -0.88);
+    lowerBodyGeo.rotateY(Math.PI / 2);
+    lowerBodyGeo.computeVertexNormals();
+
+    const lowerBodyMesh = new THREE.Mesh(lowerBodyGeo, carPaintMat);
+    lowerBodyMesh.castShadow = true;
+    carBodyGroup.add(lowerBodyMesh);
+
+    const cabinShape = new THREE.Shape();
+    cabinShape.moveTo(-0.82, 0.83);
+    cabinShape.quadraticCurveTo(-0.25, 1.34, 0.35, 1.35);
+    cabinShape.quadraticCurveTo(1.25, 1.32, 1.88, 0.89);
+    cabinShape.lineTo(-0.82, 0.83);
+
+    const cabinGeo = new THREE.ExtrudeGeometry(cabinShape, { steps: 1, depth: 1.36, bevelEnabled: true, bevelThickness: 0.11, bevelSize: 0.07, bevelSegments: 5 });
+    cabinGeo.translate(0, 0, -0.68);
+    cabinGeo.rotateY(Math.PI / 2);
+    cabinGeo.computeVertexNormals();
+
+    const cabinMesh = new THREE.Mesh(cabinGeo, carGlassMat);
+    cabinMesh.castShadow = true;
+    carBodyGroup.add(cabinMesh);
+
+    const splitter = new THREE.Mesh(new THREE.BoxGeometry(1.94, 0.05, 4.74), glossBlackTrimMat);
+    splitter.position.set(0, 0.21, 0);
+    carBodyGroup.add(splitter);
+
+    // Headlights
+    const headlightMat = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#e0f2fe', emissiveIntensity: 3.6 });
+    [-0.66, 0.66].forEach((hx) => {
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.045, 0.08), headlightMat);
+      blade.position.set(hx, 0.66, -2.38);
+      blade.rotation.y = hx > 0 ? -0.18 : 0.18;
+      carBodyGroup.add(blade);
+    });
+
+    const taillightMat = new THREE.MeshStandardMaterial({ color: '#ef4444', emissive: '#ff1e27', emissiveIntensity: 2.8 });
+    const tailBar = new THREE.Mesh(new THREE.BoxGeometry(1.76, 0.045, 0.06), taillightMat);
+    tailBar.position.set(0, 0.76, 2.38);
+    carBodyGroup.add(tailBar);
+
+    // Charge port
+    const portHousing = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.18, 0.22), glossBlackTrimMat);
+    portHousing.position.set(-0.96, 0.76, -1.18);
+    carBodyGroup.add(portHousing);
+
+    const portRingMat = new THREE.MeshStandardMaterial({ color: '#0f172a', emissive: '#38bdf8', emissiveIntensity: 0.0 });
+    const portRing = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.011, 12, 24), portRingMat);
+    portRing.rotation.y = Math.PI / 2;
+    portRing.position.set(-0.985, 0.76, -1.18);
+    carBodyGroup.add(portRing);
+
+    const portFlapPivot = new THREE.Group();
+    portFlapPivot.position.set(-0.98, 0.76, -1.29);
+    const portFlap = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.18, 0.22), carPaintMat);
+    portFlap.position.set(0, 0, 0.11);
+    portFlapPivot.add(portFlap);
+    carBodyGroup.add(portFlapPivot);
+
+    // Wheels
+    const wheels = [];
+    const frontSteerPivots = [];
+    const tireMat = new THREE.MeshStandardMaterial({ color: '#121418', roughness: 0.68 });
+    const alloyMat = new THREE.MeshStandardMaterial({ color: '#d8dee9', roughness: 0.2, metalness: 0.94 });
+
+    function createWheel(x, z, isFront) {
+      const steerPivot = new THREE.Group();
+      steerPivot.position.set(x, 0.37, z);
+      carRoot.add(steerPivot);
+      if (isFront) frontSteerPivots.push(steerPivot);
+
+      const spinGroup = new THREE.Group();
+      steerPivot.add(spinGroup);
+      wheels.push(spinGroup);
+
+      const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.37, 0.27, 24), tireMat);
+      tire.rotation.z = Math.PI / 2;
+      tire.castShadow = true;
+      spinGroup.add(tire);
+
+      const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.276, 24), alloyMat);
+      rim.rotation.z = Math.PI / 2;
+      spinGroup.add(rim);
+
+      for (let i = 0; i < 5; i++) {
+        const angle = (i / 5) * Math.PI * 2;
+        const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.282, 0.032, 0.48), alloyMat);
+        spoke.rotation.x = angle;
+        spinGroup.add(spoke);
+      }
+    }
+
+    createWheel(-0.91, -1.42, true);
+    createWheel(0.91, -1.42, true);
+    createWheel(-0.91, 1.42, false);
+    createWheel(0.91, 1.42, false);
+
+    // Cable & Connector
+    const cableMat = new THREE.MeshStandardMaterial({ color: '#11151c', roughness: 0.36 });
+    const connectorGroup = new THREE.Group();
+    scene.add(connectorGroup);
+
+    const plugGrip = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.14, 0.22), darkAnodizedMat);
+    connectorGroup.add(plugGrip);
+
+    const plugNozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.042, 0.12, 16), glossBlackTrimMat);
+    plugNozzle.rotation.z = Math.PI / 2;
+    plugNozzle.position.set(0.08, 0.02, -0.06);
+    connectorGroup.add(plugNozzle);
+
+    const plugLedMat = new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#38bdf8', emissiveIntensity: 2.2 });
+    const plugLed = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.16), plugLedMat);
+    plugLed.position.set(0, 0.06, 0);
+    connectorGroup.add(plugLed);
+
+    let cableMesh = null;
+    const holsterPos = new THREE.Vector3(-0.36, 1.42, -3.65);
+
+    function updateCableGeometry(plugTipPos, sagAmount = 0.55) {
+      if (cableMesh) {
+        scene.remove(cableMesh);
+        cableMesh.geometry.dispose();
+      }
+      const p0 = holsterPos.clone();
+      const p1 = new THREE.Vector3(
+        THREE.MathUtils.lerp(p0.x, plugTipPos.x, 0.32),
+        Math.min(p0.y, plugTipPos.y) - sagAmount,
+        THREE.MathUtils.lerp(p0.z, plugTipPos.z, 0.35)
+      );
+      const p2 = new THREE.Vector3(
+        THREE.MathUtils.lerp(p0.x, plugTipPos.x, 0.72),
+        Math.min(p0.y, plugTipPos.y) - sagAmount * 0.75,
+        THREE.MathUtils.lerp(p0.z, plugTipPos.z, 0.75)
+      );
+      const p3 = plugTipPos.clone().add(new THREE.Vector3(-0.06, -0.04, 0.08));
+
+      const curve = new THREE.CatmullRomCurve3([p0, p1, p2, p3]);
+      const tubeGeo = new THREE.TubeGeometry(curve, 28, 0.024, 8, false);
+      cableMesh = new THREE.Mesh(tubeGeo, cableMat);
+      scene.add(cableMesh);
+      return curve;
+    }
+
+    connectorGroup.position.copy(holsterPos);
+    connectorGroup.rotation.set(0.2, 0, 0);
+    updateCableGeometry(holsterPos, 0.45);
+
+    // Drive Spline
+    const drivePath = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(14.5, 0, 14.5),
+      new THREE.Vector3(8.5, 0, 11.2),
+      new THREE.Vector3(3.2, 0, 7.6),
+      new THREE.Vector3(0.45, 0, 4.0),
+      new THREE.Vector3(0.0, 0, 1.35),
+      new THREE.Vector3(0.0, 0, -0.15)
+    ], false, 'centripetal', 0.45);
+
+    const easeInOutCubic = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    const easeOutQuart = (t) => 1 - Math.pow(1 - t, 4);
+    const easeInOutSine = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
+    const smoothRange = (t, a, b) => easeInOutCubic(THREE.MathUtils.clamp((t - a) / (b - a), 0, 1));
+
+    const TOTAL_DURATION = 24.0;
+    let simTime = 0;
+    let isPlaying = true;
+    let isDirectorMode = true;
+    let lastHeading = 0;
+    let wheelRotationAngle = 0;
+    let lastCarPos = drivePath.getPointAt(0);
+
+    const scrubber = document.getElementById('timeline-scrubber');
+    const btnPlayPause = document.getElementById('btn-play-pause');
+    const iconPlay = document.getElementById('icon-play');
+    const iconPause = document.getElementById('icon-pause');
+    const btnCamMode = document.getElementById('btn-cam-mode');
+    const camLabel = document.getElementById('cam-label');
+    const camDot = document.getElementById('cam-dot');
+    const btnReplay = document.getElementById('btn-replay');
+
+    const chapterStep = document.getElementById('chapter-step');
+    const chapterTitle = document.getElementById('chapter-title');
+    const chapterDesc = document.getElementById('chapter-desc');
+    const narrativeBox = document.getElementById('narrative-box');
+
+    const telemCard = document.getElementById('telemetry-card');
+    const telemStatus = document.getElementById('telem-status');
+    const telemSoc = document.getElementById('telem-soc');
+    const telemKw = document.getElementById('telem-kw');
+    const telemBar = document.getElementById('telem-bar');
+
+    const chapters = [
+      { step: '01 // ARRIVAL', title: 'Effortless Approach.', desc: 'Precision optical guidance welcomes the EV into an ultra-low-latency 350kW bay.' },
+      { step: '02 // ALIGNMENT', title: 'Whisper-Quiet Arrival.', desc: 'Adaptive suspension settles smoothly into Bay 02 as automated session authenticates.' },
+      { step: '03 // AUTO-DOCK', title: 'Seamless Connection.', desc: 'Motorized charge port actuation and ergonomic liquid-cooled docking initiate handshake.' },
+      { step: '04 // 350KW SURGE', title: 'Power at Speed of Light.', desc: '800-volt architecture delivers up to 350 kW—adding 300 km range in minutes.' }
+    ];
+
+    let currentChapterIndex = -1;
+    function setNarrative(index) {
+      if (index === currentChapterIndex) return;
+      currentChapterIndex = index;
+      narrativeBox.style.opacity = '0';
+      setTimeout(() => {
+        const c = chapters[index];
+        chapterStep.textContent = c.step;
+        chapterTitle.textContent = c.title;
+        chapterDesc.textContent = c.desc;
+        narrativeBox.style.opacity = '1';
+      }, 200);
+    }
+
+    const tempPos = new THREE.Vector3();
+    const tempTangent = new THREE.Vector3();
+    const camTargetPos = new THREE.Vector3();
+    const camTargetLook = new THREE.Vector3();
+    const worldPortPos = new THREE.Vector3();
+
+    function updateCommercial(progress, dt) {
+      const driveT = THREE.MathUtils.clamp(progress / 0.44, 0, 1);
+      const pathU = easeOutQuart(driveT);
+      drivePath.getPointAt(pathU, tempPos);
+      drivePath.getTangentAt(pathU, tempTangent);
+
+      carRoot.position.copy(tempPos);
+
+      const targetHeading = Math.atan2(-tempTangent.x, -tempTangent.z);
+      carRoot.rotation.y = targetHeading;
+
+      let steerDelta = (targetHeading - lastHeading);
+      if (steerDelta > Math.PI) steerDelta -= Math.PI * 2;
+      if (steerDelta < -Math.PI) steerDelta += Math.PI * 2;
+      const targetSteer = driveT < 0.98 ? THREE.MathUtils.clamp(steerDelta * 18, -0.42, 0.42) : 0;
+      frontSteerPivots.forEach((p) => {
+        p.rotation.y = THREE.MathUtils.lerp(p.rotation.y, targetSteer, 0.18);
+      });
+      lastHeading = targetHeading;
+
+      const distMoved = tempPos.distanceTo(lastCarPos);
+      wheelRotationAngle -= distMoved / 0.37;
+      wheels.forEach((w) => { w.rotation.x = wheelRotationAngle; });
+      lastCarPos.copy(tempPos);
+
+      const isBraking = progress >= 0.28 && progress <= 0.45;
+      taillightMat.emissiveIntensity = isBraking ? 4.8 : 1.8;
+
+      const flapOpenT = smoothRange(progress, 0.45, 0.52);
+      portFlapPivot.rotation.y = flapOpenT * (Math.PI * 0.46);
+
+      carRoot.updateMatrixWorld(true);
+      portRing.getWorldPosition(worldPortPos);
+      const dockedPlugPos = worldPortPos.clone().add(new THREE.Vector3(-0.075, -0.01, 0));
+
+      const dockT = smoothRange(progress, 0.51, 0.64);
+      if (dockT <= 0.001) {
+        connectorGroup.position.copy(holsterPos);
+        connectorGroup.rotation.set(0.2, 0, 0);
+        updateCableGeometry(holsterPos, 0.45);
+      } else {
+        const arcLift = Math.sin(dockT * Math.PI) * 0.32;
+        const currentPlugPos = new THREE.Vector3().lerpVectors(holsterPos, dockedPlugPos, dockT);
+        currentPlugPos.y += arcLift;
+        currentPlugPos.x -= Math.sin(dockT * Math.PI) * 0.25;
+
+        connectorGroup.position.copy(currentPlugPos);
+        connectorGroup.rotation.set(THREE.MathUtils.lerp(0.2, 0, dockT), 0, 0);
+        updateCableGeometry(currentPlugPos, THREE.MathUtils.lerp(0.45, 0.62, dockT));
+      }
+
+      const isDocked = progress >= 0.64;
+      const chargeT = smoothRange(progress, 0.66, 0.98);
+      const pulseWave = 0.5 + 0.5 * Math.sin(simTime * 5.0);
+
+      let soc = 42;
+      let kw = 0;
+
+      if (!isDocked) {
+        portRingMat.emissive.set('#38bdf8');
+        portRingMat.emissiveIntensity = flapOpenT * 1.8;
+        plugLedMat.emissive.set('#38bdf8');
+        chargerHaloMaterials[1].emissive.set('#38bdf8');
+        bayGuideMaterials[1].emissive.set('#38bdf8');
+        screenController.update(progress > 0.42 ? 'VEHICLE DETECTED' : 'BAY READY', 42, 0);
+      } else {
+        soc = 42 + chargeT * 38;
+        const rampUp = smoothRange(progress, 0.65, 0.72);
+        kw = rampUp * (342 + Math.sin(simTime * 3.2) * 6);
+
+        const emerald = new THREE.Color('#10b981');
+        portRingMat.emissive.copy(emerald);
+        portRingMat.emissiveIntensity = 1.6 + pulseWave * 1.8;
+
+        plugLedMat.emissive.copy(emerald);
+        plugLedMat.emissiveIntensity = 1.8 + pulseWave * 1.5;
+
+        chargerHaloMaterials[1].emissive.copy(emerald);
+        chargerHaloMaterials[1].emissiveIntensity = 1.5 + pulseWave * 1.4;
+
+        bayGuideMaterials[1].emissive.copy(emerald);
+        bayGuideMaterials[1].emissiveIntensity = 1.2 + pulseWave * 1.0;
+
+        screenController.update('CHARGING • 350kW', soc, kw);
+      }
+
+      if (progress < 0.30) setNarrative(0);
+      else if (progress < 0.50) setNarrative(1);
+      else if (progress < 0.67) setNarrative(2);
+      else setNarrative(3);
+
+      if (progress > 0.36) {
+        telemCard.classList.remove('opacity-0', 'translate-y-2');
+        telemCard.classList.add('opacity-100', 'translate-y-0');
+        telemSoc.textContent = Math.round(soc);
+        telemKw.textContent = Math.round(kw);
+        telemBar.style.width = `${soc}%`;
+        if (isDocked) {
+          telemStatus.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span><span class="text-emerald-300">Charging</span>`;
+        } else {
+          telemStatus.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span><span class="text-sky-300">Paired</span>`;
+        }
+      } else {
+        telemCard.classList.add('opacity-0', 'translate-y-2');
+        telemCard.classList.remove('opacity-100', 'translate-y-0');
+      }
+
+      if (isDirectorMode) {
+        if (progress < 0.34) {
+          const t1 = progress / 0.34;
+          const ease1 = easeInOutSine(t1);
+          camTargetPos.set(THREE.MathUtils.lerp(11.5, 4.2, ease1), THREE.MathUtils.lerp(1.55, 1.35, ease1), THREE.MathUtils.lerp(16.8, 5.6, ease1));
+          camTargetLook.set(carRoot.position.x * 0.75, 0.85, carRoot.position.z - 1.2);
+        } else if (progress < 0.51) {
+          const t2 = (progress - 0.34) / 0.17;
+          const ease2 = easeInOutCubic(t2);
+          camTargetPos.set(THREE.MathUtils.lerp(4.2, -2.85, ease2), THREE.MathUtils.lerp(1.35, 1.48, ease2), THREE.MathUtils.lerp(5.6, 2.35, ease2));
+          camTargetLook.set(THREE.MathUtils.lerp(0, -0.35, ease2), 0.82, THREE.MathUtils.lerp(-0.5, -1.35, ease2));
+        } else if (progress < 0.69) {
+          const t3 = (progress - 0.51) / 0.18;
+          const ease3 = easeInOutSine(t3);
+          camTargetPos.set(THREE.MathUtils.lerp(-2.35, -2.15, ease3), THREE.MathUtils.lerp(1.18, 1.05, ease3), THREE.MathUtils.lerp(-0.15, -0.55, ease3));
+          camTargetLook.set(-0.92, 0.82, -1.35);
+        } else {
+          const t4 = (progress - 0.69) / 0.31;
+          const ease4 = easeInOutCubic(t4);
+          camTargetPos.set(THREE.MathUtils.lerp(-2.15, -5.8, ease4), THREE.MathUtils.lerp(1.05, 2.65, ease4), THREE.MathUtils.lerp(-0.55, 6.8, ease4));
+          camTargetLook.set(THREE.MathUtils.lerp(-0.92, 0.2, ease4), THREE.MathUtils.lerp(0.82, 1.35, ease4), THREE.MathUtils.lerp(-1.35, -1.6, ease4));
+        }
+
+        const lerpFactor = 1 - Math.exp(-5.5 * Math.max(dt, 0.016));
+        camera.position.lerp(camTargetPos, lerpFactor);
+        controls.target.lerp(camTargetLook, lerpFactor);
+        camera.lookAt(controls.target);
+      } else {
+        controls.update();
+      }
+    }
+
+    function syncPlayStateUI() {
+      if (isPlaying) {
+        iconPause.classList.remove('hidden');
+        iconPlay.classList.add('hidden');
+      } else {
+        iconPause.classList.add('hidden');
+        iconPlay.classList.remove('hidden');
+      }
+    }
+
+    btnPlayPause.addEventListener('click', () => {
+      isPlaying = !isPlaying;
+      syncPlayStateUI();
+    });
+
+    btnReplay.addEventListener('click', () => {
+      simTime = 0;
+      isPlaying = true;
+      syncPlayStateUI();
+    });
+
+    btnCamMode.addEventListener('click', () => {
+      isDirectorMode = !isDirectorMode;
+      controls.enabled = !isDirectorMode;
+      if (isDirectorMode) {
+        btnCamMode.classList.add('active');
+        camLabel.textContent = 'Director';
+        camDot.classList.remove('hidden');
+      } else {
+        btnCamMode.classList.remove('active');
+        camLabel.textContent = 'Orbit';
+        camDot.classList.add('hidden');
+      }
+    });
+
+    scrubber.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value) / 1000;
+      simTime = val * TOTAL_DURATION;
+      updateCommercial(val, 0.016);
+    });
+
+    function handleResize() {
+      const w = container.clientWidth || window.innerWidth;
+      const h = container.clientHeight || window.innerHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      composer.setSize(w, h);
+      bloomPass.resolution.set(w, h);
+    }
+    window.addEventListener('resize', handleResize);
+
+    const clock = new THREE.Clock();
+    updateCommercial(0, 0.016);
+    composer.render();
+
+    const loader = document.getElementById('loader');
+    const loaderBar = document.getElementById('loader-bar');
+    requestAnimationFrame(() => {
+      if (loaderBar) loaderBar.style.width = '100%';
+      setTimeout(() => {
+        if (loader) {
+          loader.style.opacity = '0';
+          setTimeout(() => loader.remove(), 700);
+        }
+      }, 350);
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.1);
+
+      if (isPlaying) {
+        simTime = (simTime + dt) % TOTAL_DURATION;
+        const progress = simTime / TOTAL_DURATION;
+        scrubber.value = Math.round(progress * 1000);
+        updateCommercial(progress, dt);
+      } else if (!isDirectorMode) {
+        controls.update();
+      }
+
+      composer.render();
+    }
+
+    animate();
+  </script>
+</body>
+</html>
