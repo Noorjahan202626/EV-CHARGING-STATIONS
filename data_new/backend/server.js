@@ -9,6 +9,8 @@ import { pool } from "./db.js";
 import * as crypto from "crypto";
 import meVehiclesRouter from "./routes/meVehicles.js"; // Adjust path if needed
 import stationsRouter from "./routes/stations.js";
+import { validateIndianVehicleNumber } from "./utils/vehicleValidation.js";
+import { validateEmail } from "./utils/authValidation.js";
 const app = express();
 // expose pool to routers via app.locals
 app.locals.pool = pool;
@@ -63,9 +65,9 @@ app.get("/api/whoami", async (req, res) => {
 // GET /api/connector-types
 app.get("/api/connector-types", requireAuth, async (req, res) => {
     try {
-        // Fetch all connector types from the database
+        // Fetch all connector types from the database with current_type (AC/DC) and description
         const result = await pool.query(
-            "SELECT connector_type_id AS id, code FROM connector_types"
+            "SELECT connector_type_id AS id, code, description, current_type FROM connector_types ORDER BY connector_type_id"
         );
         res.json({
             ok: true,
@@ -82,16 +84,38 @@ app.post("/api/register", async (req, res) => {
     const { name, email, password, registrationNo, vehicleType } = req.body;
 
     if (!name?.trim()) return res.status(400).json({ ok: false, error: "Full name is required." });
-    if (!email?.trim() || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ ok: false, error: "A valid email is required." });
-    if (!password || password.length < 8) return res.status(400).json({ ok: false, error: "Password must be at least 8 characters." });
-    if (!registrationNo?.trim()) return res.status(400).json({ ok: false, error: "Vehicle registration number is required." });
+    
+    // Email validation & canonicalization (Gmail-specific & General provider rules)
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+        return res.status(400).json({ ok: false, error: emailValidation.error });
+    }
+    const cleanEmail = emailValidation.normalized;
+    const canonicalEmail = emailValidation.canonical;
+    
+    // Password validation: minimum 8 characters, at least one uppercase letter, one digit, and one special character
+    const passwordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+    if (!password || !passwordRegex.test(password)) {
+        return res.status(400).json({
+            ok: false,
+            error: "Password must be at least 8 characters long and contain at least one uppercase letter, one digit, and one special character."
+        });
+    }
+
+    // Registration number validation (MoRTH Indian Standard RTO & BH series)
+    const regValidation = validateIndianVehicleNumber(registrationNo);
+    if (!regValidation.valid) {
+        return res.status(400).json({ ok: false, error: regValidation.error });
+    }
+    const cleanRegNo = regValidation.normalized;
+
     if (!vehicleType?.trim()) return res.status(400).json({ ok: false, error: "Vehicle type is required." });
 
     const client = await pool.connect();
     try {
         const emailCheck = await client.query(
-            "SELECT user_id FROM users WHERE LOWER(email) = LOWER($1)",
-            [email.trim()]
+            "SELECT user_id FROM users WHERE canonical_email = $1 OR LOWER(email) = LOWER($2)",
+            [canonicalEmail, cleanEmail]
         );
         if (emailCheck.rows.length > 0) {
             return res.status(409).json({ ok: false, error: "An account with this email address already exists." });
@@ -99,7 +123,7 @@ app.post("/api/register", async (req, res) => {
 
         const regCheck = await client.query(
             "SELECT vehicle_id FROM vehicles WHERE UPPER(registration_no) = UPPER($1)",
-            [registrationNo.trim()]
+            [cleanRegNo]
         );
         if (regCheck.rows.length > 0) {
             return res.status(409).json({ ok: false, error: "This vehicle registration number is already registered." });
@@ -122,10 +146,10 @@ app.post("/api/register", async (req, res) => {
         await client.query("BEGIN");
 
         const userInsert = await client.query(
-            `INSERT INTO users (name, email, password_hash, role)
-             VALUES ($1, $2, $3, 'USER')
-             RETURNING user_id, name, email, role`,
-            [name.trim(), email.trim().toLowerCase(), passwordHash]
+            `INSERT INTO users (name, email, canonical_email, password_hash, role)
+             VALUES ($1, $2, $3, $4, 'USER')
+             RETURNING user_id, name, email, canonical_email, role`,
+            [name.trim(), cleanEmail, canonicalEmail, passwordHash]
         );
         const newUser = userInsert.rows[0];
 
@@ -133,7 +157,7 @@ app.post("/api/register", async (req, res) => {
             `INSERT INTO vehicles (registration_no, user_id, category_id)
              VALUES ($1, $2, $3)
              RETURNING vehicle_id, registration_no`,
-            [registrationNo.trim().toUpperCase(), newUser.user_id, categoryId]
+            [cleanRegNo, newUser.user_id, categoryId]
         );
         const newVehicle = vehicleInsert.rows[0];
 
@@ -166,6 +190,20 @@ app.post("/api/register", async (req, res) => {
         });
     } catch (err) {
         await client.query("ROLLBACK");
+        if (err.code === "23505") {
+            if (
+                err.constraint === "users_canonical_email_unique" ||
+                err.constraint === "users_email_key" ||
+                err.detail?.includes("email") ||
+                err.detail?.includes("canonical_email")
+            ) {
+                return res.status(409).json({ ok: false, error: "An account with this email address already exists." });
+            }
+            if (err.detail?.includes("registration_no")) {
+                return res.status(409).json({ ok: false, error: "This vehicle registration number is already registered." });
+            }
+            return res.status(409).json({ ok: false, error: "An account with these details already exists." });
+        }
         console.error("Registration error:", err);
         res.status(500).json({ ok: false, error: "Failed to register. " + err.message });
     } finally {
@@ -180,10 +218,20 @@ app.post("/api/login", async (req, res) => {
         return res.status(400).json({ ok: false, error: "Email and password are required." });
     }
 
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+        return res.status(400).json({ ok: false, error: emailValidation.error });
+    }
+    const cleanEmail = emailValidation.normalized;
+    const canonicalEmail = emailValidation.canonical;
+
     try {
         const result = await pool.query(
-            "SELECT user_id, name, email, password_hash, role FROM users WHERE LOWER(email) = LOWER($1)",
-            [email.trim()]
+            `SELECT user_id, name, email, canonical_email, password_hash, role 
+             FROM users 
+             WHERE canonical_email = $1 OR LOWER(email) = LOWER($2)
+             LIMIT 1`,
+            [canonicalEmail, cleanEmail]
         );
 
         if (result.rows.length === 0) {
