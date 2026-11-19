@@ -43,8 +43,9 @@ export default function Dashboard() {
   const [filter, setFilter] = useState(null);
   const [stations, setStations] = useState([]);
   const [stationsError, setStationsError] = useState(null);
-  const [loadingStations, setLoadingStations] = useState(true);
-  const [userLocation, setUserLocation] = useState(null); // [lat, lng]
+  const [loadingStations, setLoadingStations] = useState(false);
+  const [userLocation, setUserLocation] = useState(null); // [lat, lng] detected from user's GPS
+  const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState(null);
   const [radiusKm, setRadiusKm] = useState(5);
 
@@ -53,14 +54,50 @@ export default function Dashboard() {
     if (!user) navigate("/login");
   }, [user, navigate]);
 
-  // Fetch stations once
+  // Get the user's location once
   useEffect(() => {
+    if (!("geolocation" in navigator)) {
+      setLocationError("Geolocation is not supported by your browser. Please use a browser that supports location services.");
+      setLocationLoading(false);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation([pos.coords.latitude, pos.coords.longitude]);
+        setLocationLoading(false);
+        setLocationError(null);
+      },
+      (err) => {
+        console.warn("Geolocation failed:", err);
+        setLocationError("Please enable location access in your browser to view charging stations near your location.");
+        setLocationLoading(false);
+        setUserLocation(null);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }, []);
+
+  // Fetch stations filtered by location and radius from backend
+  useEffect(() => {
+    if (!userLocation || !Array.isArray(userLocation)) {
+      setStations([]);
+      setLoadingStations(false);
+      return;
+    }
+    const [lat, lng] = userLocation;
     const token =
       JSON.parse(localStorage.getItem("user") || "{}").token || localStorage.getItem("token");
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
     const controller = new AbortController();
 
-    fetch("/api/stations", { headers, signal: controller.signal })
+    setLoadingStations(true);
+    const queryParams = new URLSearchParams({
+      lat: String(lat),
+      lng: String(lng),
+      radius: String(radiusKm),
+    });
+
+    fetch(`/api/stations?${queryParams.toString()}`, { headers, signal: controller.signal })
       .then((r) => {
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
         return r.json();
@@ -85,26 +122,7 @@ export default function Dashboard() {
       });
 
     return () => controller.abort();
-  }, []);
-
-  // Get the user's location once
-  useEffect(() => {
-    if (!("geolocation" in navigator)) {
-      setLocationError("Location is not supported in this browser.");
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setUserLocation([pos.coords.latitude, pos.coords.longitude]);
-        setLocationError(null);
-      },
-      (err) => {
-        console.warn("Geolocation failed:", err);
-        setLocationError("Allow location access to see stations near you.");
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-    );
-  }, []);
+  }, [userLocation, radiusKm]);
 
   // Compatibility filtering lives here only. The map receives already-filtered stations.
   const filteredStations = useMemo(() => {
@@ -126,16 +144,24 @@ export default function Dashboard() {
         const stationCurrent = station.currentType
           ? String(station.currentType).toUpperCase()
           : null;
-        const connectorMatch = connectors.some(
-          (c) =>
-            typeof c === "object" &&
-            String(c.current_type ?? c.currentType ?? "").toUpperCase() === wanted
-        );
-        // Only reject if the data actually has a current type to compare against
-        const hasCurrentData =
-          stationCurrent !== null ||
-          connectors.some((c) => typeof c === "object" && (c.current_type ?? c.currentType));
-        if (hasCurrentData && stationCurrent !== wanted && !connectorMatch) return false;
+        const currentTypesList = Array.isArray(station.currentTypes)
+          ? station.currentTypes.map((t) => String(t).toUpperCase())
+          : [];
+        const hasDirectCurrentType = currentTypesList.includes(wanted) || stationCurrent === wanted;
+
+        const connectorMatch = connectors.some((c) => {
+          if (typeof c === "object" && c != null) {
+            const ct = String(c.current_type ?? c.currentType ?? "").toUpperCase();
+            if (ct === wanted) return true;
+          }
+          const token = typeof c === "string" ? c : c?.code || c?.type || "";
+          const tNorm = String(token).toUpperCase();
+          if (wanted === "DC" && /\bDC\b|CCS|CHADEMO|GB[\s/_-]*T/.test(tNorm)) return true;
+          if (wanted === "AC" && /\bAC\b|TYPE[\s_-]*2|15A|SOCKET/.test(tNorm)) return true;
+          return false;
+        });
+
+        if (!hasDirectCurrentType && !connectorMatch) return false;
       }
 
       // 3. Available only
@@ -179,8 +205,16 @@ export default function Dashboard() {
 
       <div className="mt-4" style={{ width: "100%" }}>
         {locationError && <div className="alert alert-warning">{locationError}</div>}
-        {loadingStations ? (
-          <div className="text-muted">Loading stations...</div>
+        {locationLoading ? (
+          <div className="text-muted py-2 d-flex align-items-center">
+            <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+            Detecting your location...
+          </div>
+        ) : loadingStations ? (
+          <div className="text-muted py-2 d-flex align-items-center">
+            <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+            Loading stations near you...
+          </div>
         ) : (
           <NearbyDistance
             stations={filteredStations}

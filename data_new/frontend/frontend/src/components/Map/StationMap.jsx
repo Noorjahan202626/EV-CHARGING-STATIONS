@@ -13,7 +13,6 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-const DEFAULT_CENTER = [12.9716, 77.5946]; // fallback until GPS locks in
 const DEFAULT_RADIUS = 5;
 const PRESET_DISTANCES = [2, 5, 10];
 const MAX_MARKERS = 500;
@@ -97,6 +96,14 @@ const getStationIcon = (color) => {
 
 // Supports: position:[lat,lng], {latitude,longitude}, {lat,lng}, GeoJSON [lng,lat]
 const getPosition = (s) => {
+  if (Array.isArray(s._pos) && s._pos.length >= 2) {
+    const lat = parseFloat(s._pos[0]);
+    const lng = parseFloat(s._pos[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+      return [lat, lng];
+    }
+  }
+
   let lat = s.latitude ?? s.lat;
   let lng = s.longitude ?? s.lng ?? s.lon;
 
@@ -115,7 +122,7 @@ const getPosition = (s) => {
 
   lat = parseFloat(lat);
   lng = parseFloat(lng);
-  if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+  if (Number.isNaN(lat) || Number.isNaN(lng) || (lat === 0 && lng === 0)) return null;
   return [lat, lng];
 };
 
@@ -146,12 +153,83 @@ const normalizeConnectors = (list) =>
     .map((c) => String(c).toUpperCase())
     .filter(Boolean);
 
+// ---- Connector matching (FIX) ----
+// "CCS 2 (DC)", "CCS2", "ccs_2" -> "CCS2DC" / "CCS2" / "CCS2" (letters+digits only)
+const normCode = (v) => String(v ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+const asArray = (v) => (Array.isArray(v) ? v : v == null || v === "" ? [] : [v]);
+
+// Turns a mixed list (strings, numbers, objects) into { codes, ids }
+const toConnectorKeys = (list) => {
+  const codes = [];
+  const ids = [];
+  asArray(list).forEach((c) => {
+    if (c && typeof c === "object") {
+      const code = normCode(c.type || c.code || c.name || c.connector_type_code);
+      if (code) codes.push(code);
+      const id = c.connector_type_id ?? c.connectorTypeId;
+      if (id != null) ids.push(String(id));
+    } else if (typeof c === "number") {
+      ids.push(String(c));
+    } else if (c != null) {
+      const code = normCode(c);
+      if (code) codes.push(code);
+    }
+  });
+  return { codes, ids };
+};
+// Spreads co-located stations by a tiny radial offset (~5–8m, e.g. 0.00008 deg)
+// so each station row gets its own distinct, clickable marker on the map.
+const spreadOverlappingStations = (list) => {
+  if (!Array.isArray(list)) return [];
+  const coordGroups = new Map();
+
+  for (let i = 0; i < list.length; i++) {
+    const s = list[i];
+    const pos = getPosition(s);
+    if (!pos) continue;
+    const key = `${pos[0].toFixed(6)}_${pos[1].toFixed(6)}`;
+    if (!coordGroups.has(key)) {
+      coordGroups.set(key, []);
+    }
+    coordGroups.get(key).push({ station: s, pos, index: i });
+  }
+
+  const OFFSET = 0.00008; // ~8 meters
+  const result = [];
+
+  for (const group of coordGroups.values()) {
+    if (group.length === 1) {
+      result.push({
+        ...group[0].station,
+        _pos: group[0].pos,
+      });
+    } else {
+      const count = group.length;
+      group.forEach((item, idx) => {
+        const angle = (2 * Math.PI * idx) / count;
+        const offsetLat = item.pos[0] + OFFSET * Math.sin(angle);
+        const offsetLng = item.pos[1] + OFFSET * Math.cos(angle);
+        result.push({
+          ...item.station,
+          _pos: [offsetLat, offsetLng],
+        });
+      });
+    }
+  }
+
+  return result;
+};
+// exact match, or one starts with the other ("CCS2" vs "CCS2DC")
+const codesMatch = (a, b) => !!a && !!b && (a === b || a.startsWith(b) || b.startsWith(a));
+
 const BAD_STATUSES = ["FULL", "OCCUPIED", "OFFLINE"];
 
 // ---------- Main component ----------
 /**
  * Props (all optional, so the component also works standalone)
- *  - filter:           connector / current / availability filter object
+ *  - filter:           object from CompatibilityFilter
+ *                      (connectorCode, connectorTypeId, connectorTypeIds, currentType, availableOnly)
  *  - stationsData:     stations array from the parent. If omitted (undefined/null),
  *                      the map fetches /api/stations itself.
  *  - userLocation:     [lat, lng] from the parent. If omitted, the map uses GPS itself.
@@ -172,12 +250,13 @@ export default function StationMap({
 
   // Parent controls stations when it passes an array (even an empty one).
   const parentControlsStations = Array.isArray(stationsData);
-  const stations = parentControlsStations ? stationsData : fetchedStations;
+  const stationsRaw = parentControlsStations ? stationsData : fetchedStations;
+  const stations = useMemo(() => spreadOverlappingStations(stationsRaw), [stationsRaw]);
 
   // ----- location -----
   const [gpsLocation, setGpsLocation] = useState(null);
   const parentLocation = normalizeLocation(externalUserLocation);
-  const userLocation = parentLocation ?? gpsLocation ?? DEFAULT_CENTER;
+  const userLocation = parentLocation ?? gpsLocation ?? null;
 
   // ----- radius -----
   const [internalRadius, setInternalRadius] = useState(DEFAULT_RADIUS);
@@ -202,7 +281,7 @@ export default function StationMap({
     if (parentLocation || !("geolocation" in navigator)) return;
     navigator.geolocation.getCurrentPosition(
       (p) => setGpsLocation([p.coords.latitude, p.coords.longitude]),
-      (err) => console.warn("Location denied or failed, using default center.", err),
+      (err) => console.warn("Location denied or failed.", err),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -287,14 +366,37 @@ export default function StationMap({
   };
 
   // 3. Filter by compatibility + distance, attach distance, sort nearest first
-  const [userLat, userLng] = userLocation;
+  const [userLat, userLng] = userLocation || [null, null];
   const { nearby, totalWithin } = useMemo(() => {
+    if (!userLocation || userLat == null || userLng == null) {
+      return { nearby: [], totalWithin: 0 };
+    }
     const origin = [userLat, userLng];
     const hasFilter = !!filter && typeof filter === "object";
 
-    const wanted = hasFilter
-      ? normalizeConnectors(filter.connectorTypes || filter.connectors || filter.connectorCodes)
-      : [];
+    // FIX: read the exact fields CompatibilityFilter sends
+    // (connectorCode / connectorTypeId / connectorTypeIds), plus the older names.
+    const wantedCodes = [];
+    const wantedIds = [];
+    if (hasFilter) {
+      const byCode = toConnectorKeys([
+        filter.connectorCode,
+        ...asArray(filter.connectorCodes),
+        ...asArray(filter.connectorTypes),
+        ...asArray(filter.connectors),
+      ]);
+      const idList = [filter.connectorTypeId, ...asArray(filter.connectorTypeIds)]
+        .filter((v) => v != null && v !== "")
+        .map(String);
+      wantedCodes.push(...byCode.codes);
+      wantedIds.push(...byCode.ids);
+      idList.forEach((id) => {
+        if (/^\d+$/.test(id)) wantedIds.push(id);
+        else wantedCodes.push(normCode(id)); // fallback-list ids like "CCS2"
+      });
+    }
+    const hasConnectorFilter = wantedCodes.length > 0 || wantedIds.length > 0;
+
     const currentType = hasFilter ? filter.currentType || filter.current : null;
     const availableOnly = hasFilter
       ? !!(filter.availableNow || filter.availableOnly || filter.onlyAvailable || filter.available)
@@ -309,15 +411,26 @@ export default function StationMap({
       if (dist > radiusKm) continue;
 
       if (hasFilter) {
-        if (wanted.length > 0) {
-          const have = normalizeConnectors(s.connectorTypes || s.connectors);
-          if (!have.some((c) => wanted.includes(c))) continue;
+        if (hasConnectorFilter) {
+          const have = toConnectorKeys([
+            ...asArray(s.connectorTypes || s.connectors),
+            ...asArray(s.connector_type_ids || s.connectorTypeIds).map((n) => Number(n)),
+          ]);
+          const matchByCode = have.codes.some((c) => wantedCodes.some((w) => codesMatch(c, w)));
+          const matchById = have.ids.some((id) => wantedIds.includes(id));
+          if (!matchByCode && !matchById) continue;
         }
-        if (currentType && String(currentType).toUpperCase() !== "ALL" && s.currentType) {
-          if (String(s.currentType).toUpperCase() !== String(currentType).toUpperCase()) continue;
+        if (currentType && String(currentType).toUpperCase() !== "ALL") {
+          const wanted = String(currentType).toUpperCase();
+          const curList = Array.isArray(s.currentTypes) ? s.currentTypes.map((t) => String(t).toUpperCase()) : [];
+          const sCur = s.currentType ? String(s.currentType).toUpperCase() : null;
+          const matchDirect = curList.includes(wanted) || sCur === wanted;
+          const matchConn = (s.connectors || []).some((c) => String(c.current_type || "").toUpperCase() === wanted);
+          if (!matchDirect && !matchConn && (curList.length > 0 || sCur !== null)) continue;
         }
         if (availableOnly) {
-          if (typeof s.availableChargers === "number" && s.availableChargers <= 0) continue;
+          const avail = s.availableChargers;
+          if (avail != null && Number.isFinite(Number(avail)) && Number(avail) <= 0) continue;
           if (BAD_STATUSES.includes(String(s.status || "").toUpperCase())) continue;
         }
       }
@@ -343,8 +456,9 @@ export default function StationMap({
             Interactive Map (OpenStreetMap)
           </h5>
           <span className="text-muted small">
-            {totalWithin} stations within {radiusKm} km
-            {totalWithin > MAX_MARKERS && ` (showing nearest ${MAX_MARKERS})`}
+            {userLocation
+              ? `${totalWithin} stations within ${radiusKm} km${totalWithin > MAX_MARKERS ? ` (showing nearest ${MAX_MARKERS})` : ""}`
+              : "Waiting for your location..."}
           </span>
         </div>
 
@@ -403,79 +517,96 @@ export default function StationMap({
           </div>
         )}
 
-        <MapContainer center={userLocation} zoom={11} style={{ height: "100%", width: "100%" }}>
-          <MapResizer />
-          <MapFitRadius lat={userLat} lng={userLng} radiusKm={radiusKm} />
+        {!userLocation ? (
+          <div
+            className="d-flex flex-column align-items-center justify-content-center text-center p-4 h-100 bg-light"
+            style={{ borderRadius: "0 0 10px 10px" }}
+          >
+            <div className="spinner-border text-primary mb-3" role="status">
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <h6 className="fw-bold text-dark mb-1">Acquiring your location...</h6>
+            <p className="text-muted small mb-0" style={{ maxWidth: "420px" }}>
+              Please allow location access in your browser so we can display EV charging stations near your exact position.
+            </p>
+          </div>
+        ) : (
+          <MapContainer center={userLocation} zoom={11} style={{ height: "100%", width: "100%" }}>
+            <MapResizer />
+            <MapFitRadius lat={userLat} lng={userLng} radiusKm={radiusKm} />
 
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
 
-          <Circle
-            center={userLocation}
-            radius={radiusKm * 1000}
-            pathOptions={{
-              color: "#3b82f6",
-              fillColor: "#3b82f6",
-              fillOpacity: 0.06,
-              weight: 1.5,
-              dashArray: "4, 4",
-            }}
-          />
+            <Circle
+              center={userLocation}
+              radius={radiusKm * 1000}
+              pathOptions={{
+                color: "#3b82f6",
+                fillColor: "#3b82f6",
+                fillOpacity: 0.06,
+                weight: 1.5,
+                dashArray: "4, 4",
+              }}
+            />
 
-          <Marker position={userLocation} icon={userLocationIcon}>
-            <Popup>
-              <strong>Your Current Location</strong>
-            </Popup>
-          </Marker>
+            <Marker position={userLocation} icon={userLocationIcon}>
+              <Popup>
+                <strong>Your Current Location</strong>
+              </Popup>
+            </Marker>
 
-          {selected && (
-            <Polyline
-              positions={[userLocation, selected._pos]}
-              pathOptions={{ color: "#2563eb", weight: 3, dashArray: "8, 6" }}
-            >
-              <Tooltip permanent direction="center">
-                {formatDistance(selected._distKm)}
-              </Tooltip>
-            </Polyline>
-          )}
-
-          {nearby.map((station, i) => {
-            const id = station.id ?? station._id ?? i;
-            return (
-              <Marker
-                key={id}
-                position={station._pos}
-                icon={getStationIcon(getStationColor(station))}
-                eventHandlers={{
-                  click: () => setSelectedId(id),
-                  popupclose: () => setSelectedId((cur) => (cur === id ? null : cur)),
-                }}
+            {selected && (
+              <Polyline
+                positions={[userLocation, selected._pos]}
+                pathOptions={{ color: "#2563eb", weight: 3, dashArray: "8, 6" }}
               >
-                <Popup>
-                  <div style={{ minWidth: "170px" }}>
-                    <strong className="text-dark">{station.name}</strong>
-                    <br />
-                    <span className="text-muted small">{station.address}</span>
-                    <hr className="my-1" />
-                    <strong>Distance:</strong> {formatDistance(station._distKm)}
-                    <br />
-                    <strong>Status:</strong> {station.status || "N/A"}
-                    <br />
-                    <strong>Available Chargers:</strong> {station.availableChargers ?? "N/A"} /{" "}
-                    {station.totalChargers ?? "N/A"}
-                    <br />
-                    <strong>Connectors:</strong>{" "}
-                    {normalizeConnectors(station.connectorTypes || station.connectors).join(", ") || "N/A"}
-                    <br />
-                    <strong>Price:</strong> ₹{station.price ?? "N/A"}/kWh
-                  </div>
-                </Popup>
-              </Marker>
-            );
-          })}
-        </MapContainer>
+                <Tooltip permanent direction="center">
+                  {formatDistance(selected._distKm)}
+                </Tooltip>
+              </Polyline>
+            )}
+
+            {nearby.map((station, i) => {
+              const id = station.id != null ? `${station.id}-${i}` : i;
+              const displayPrice = station.price ?? station.tariff_per_kwh ?? "N/A";
+              return (
+                <Marker
+                  key={id}
+                  position={station._pos}
+                  icon={getStationIcon(getStationColor(station))}
+                  eventHandlers={{
+                    click: () => setSelectedId(id),
+                    popupclose: () => setSelectedId((cur) => (cur === id ? null : cur)),
+                  }}
+                >
+                  <Popup>
+                    <div style={{ minWidth: "170px" }}>
+                      <strong className="text-dark">{station.name}</strong>
+                      <br />
+                      <span className="text-muted small">{station.address}</span>
+                      <hr className="my-1" />
+                      <strong>Distance:</strong> {formatDistance(station._distKm)}
+                      <br />
+                      <strong>Status:</strong> {station.status || "N/A"}
+                      <br />
+                      <strong>Available Chargers:</strong> {station.availableChargers ?? "N/A"} /{" "}
+                      {station.totalChargers ?? "N/A"}
+                      <br />
+                      <strong>Connectors:</strong>{" "}
+                      {normalizeConnectors(station.connectorTypes || station.connectors).join(", ") || "N/A"}
+                      <br />
+                      <strong>Price:</strong>{" "}
+                      {displayPrice !== "N/A" ? `₹${displayPrice}/kWh` : "N/A"}
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
+          </MapContainer>
+        )}
       </div>
 
       <div className="card-footer bg-white py-2 px-3 border-top d-flex align-items-center gap-4 flex-wrap text-muted small">

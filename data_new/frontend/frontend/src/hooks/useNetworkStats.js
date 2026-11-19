@@ -1,24 +1,64 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * Reads the real station count from the GET /api/data endpoint.
- * status: "loading" | "ready" | "error"  – callers render a proper empty state on error.
+ * status: "loading" | "ready" | "error" - callers render a proper empty state on error.
  */
-export default function useNetworkStats() {
+export default function useNetworkStats({ pollInterval = 10000 } = {}) {
   const [state, setState] = useState({ status: "loading", stations: null });
+  const controllerRef = useRef(null);
 
-  useEffect(() => {
+  const fetchStats = useCallback(async () => {
+    controllerRef.current?.abort();
     const ctrl = new AbortController();
-    const token = JSON.parse(localStorage.getItem("user") || "{}").token;
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch("/api/data", { signal: ctrl.signal, headers })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText))))
-      .then((d) => setState({ status: "ready", stations: Number(d.stations) }))
-      .catch((e) => {
-        if (e.name !== "AbortError") setState({ status: "error", stations: null });
+    controllerRef.current = ctrl;
+
+    try {
+      const rawUser = localStorage.getItem("user");
+      const user = rawUser ? JSON.parse(rawUser) : {};
+      const headers = user?.token
+        ? { Authorization: `Bearer ${user.token}` }
+        : {};
+
+      const response = await fetch("/api/data", {
+        signal: ctrl.signal,
+        headers,
+        cache: "no-store",
       });
-    return () => ctrl.abort();
+
+      if (!response.ok) {
+        throw new Error(response.statusText || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const rawCount = data?.stations ?? data?.data?.stations;
+      const parsedCount = Number(rawCount);
+
+      setState({
+        status: "ready",
+        stations: Number.isFinite(parsedCount) ? parsedCount : null,
+      });
+    } catch (err) {
+      if (err?.name !== "AbortError") {
+        setState({ status: "error", stations: null });
+      }
+    }
   }, []);
 
-  return state;
+  useEffect(() => {
+    fetchStats();
+
+    if (!pollInterval || pollInterval <= 0) {
+      return () => controllerRef.current?.abort();
+    }
+
+    const intervalId = setInterval(fetchStats, pollInterval);
+
+    return () => {
+      clearInterval(intervalId);
+      controllerRef.current?.abort();
+    };
+  }, [fetchStats, pollInterval]);
+
+  return { ...state, refresh: fetchStats };
 }

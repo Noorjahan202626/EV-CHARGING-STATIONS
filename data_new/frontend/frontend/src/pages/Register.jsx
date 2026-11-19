@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthLayout from "../components/Auth/AuthLayout";
 import Field from "../components/Auth/Field";
+import { validateIndianVehicleNumber } from "../utils/vehicleValidation";
+import { validateEmail } from "../utils/authValidation";
 
 export default function Register() {
     const navigate = useNavigate();
@@ -19,15 +21,30 @@ export default function Register() {
     const [apiError, setApiError] = useState("");
     const [registeredUser, setRegisteredUser] = useState(null);
 
+    // Password criteria helpers for validation & UI feedback
+    const hasMinLen = form.password.length >= 8;
+    const hasUpper = /[A-Z]/.test(form.password);
+    const hasDigit = /[0-9]/.test(form.password);
+    const hasSpecial = /[^A-Za-z0-9]/.test(form.password);
+
     const change = (e) => {
+        const val = e.target.name === "registrationNo" ? e.target.value.toUpperCase() : e.target.value;
         setForm({
             ...form,
-            [e.target.name]: e.target.value
+            [e.target.name]: val
         });
         if (errors[e.target.name]) {
             setErrors({ ...errors, [e.target.name]: "" });
         }
         if (apiError) setApiError("");
+    };
+
+    const handleEmailBlur = () => {
+        if (!form.email.trim()) return;
+        const check = validateEmail(form.email);
+        if (!check.valid) {
+            setErrors((prev) => ({ ...prev, email: check.error }));
+        }
     };
 
     const submit = async (e) => {
@@ -41,21 +58,25 @@ export default function Register() {
             err.name = "Name is required.";
         }
 
-        if (!/^\S+@\S+\.\S+$/.test(form.email)) {
-            err.email = "Enter a valid email address.";
+        const emailCheck = validateEmail(form.email);
+        if (!emailCheck.valid) {
+            err.email = emailCheck.error;
         }
 
-        if (form.password.length < 8) {
-            err.password = "Use at least 8 characters.";
+        if (!form.password) {
+            err.password = "Password is required.";
+        } else if (!hasMinLen || !hasUpper || !hasDigit || !hasSpecial) {
+            err.password = "Password must have min 8 characters, 1 capital letter, 1 digit, and 1 special character.";
         }
 
         if (form.confirm !== form.password) {
             err.confirm = "Passwords do not match.";
         }
 
-        // Vehicle details validation
-        if (!form.registrationNo.trim()) {
-            err.registrationNo = "Vehicle registration number is required.";
+        // Vehicle details validation (Indian RTO & BH series)
+        const regCheck = validateIndianVehicleNumber(form.registrationNo);
+        if (!regCheck.valid) {
+            err.registrationNo = regCheck.error;
         }
 
         if (!form.vehicleType) {
@@ -76,9 +97,9 @@ export default function Register() {
                 },
                 body: JSON.stringify({
                     name: form.name.trim(),
-                    email: form.email.trim(),
+                    email: emailCheck.normalized || form.email.trim().toLowerCase(),
                     password: form.password,
-                    registrationNo: form.registrationNo.trim(),
+                    registrationNo: regCheck.normalized || form.registrationNo.trim().toUpperCase(),
                     vehicleType: form.vehicleType
                 })
             });
@@ -86,7 +107,14 @@ export default function Register() {
             const data = await response.json();
 
             if (!response.ok || !data.ok) {
-                setApiError(data.error || "Registration failed. Please try again.");
+                const msg = data.error || "Registration failed. Please try again.";
+                setApiError(msg);
+                if (msg.toLowerCase().includes("email")) {
+                    setErrors((prev) => ({ ...prev, email: msg }));
+                }
+                if (msg.toLowerCase().includes("vehicle") || msg.toLowerCase().includes("registration")) {
+                    setErrors((prev) => ({ ...prev, registrationNo: msg }));
+                }
                 setLoading(false);
                 return;
             }
@@ -226,6 +254,7 @@ export default function Register() {
                     autoComplete="email"
                     value={form.email}
                     onChange={change}
+                    onBlur={handleEmailBlur}
                     error={errors.email}
                     placeholder="you@example.com"
                     disabled={loading}
@@ -242,6 +271,33 @@ export default function Register() {
                     error={errors.password}
                     disabled={loading}
                 />
+
+                {/* Password Criteria Checklist */}
+                {form.password && (
+                    <div className="mb-3 p-3 bg-light rounded-3 border">
+                        <div className="fw-semibold text-muted mb-2" style={{ fontSize: "0.78rem" }}>
+                            Password requirements:
+                        </div>
+                        <div className="d-flex flex-column gap-1" style={{ fontSize: "0.78rem" }}>
+                            <span className={hasMinLen ? "text-success fw-medium" : "text-muted"}>
+                                <i className={`bi ${hasMinLen ? "bi-check-circle-fill text-success" : "bi-circle text-secondary"} me-2`} />
+                                At least 8 characters
+                            </span>
+                            <span className={hasUpper ? "text-success fw-medium" : "text-muted"}>
+                                <i className={`bi ${hasUpper ? "bi-check-circle-fill text-success" : "bi-circle text-secondary"} me-2`} />
+                                At least one capital letter (A–Z)
+                            </span>
+                            <span className={hasDigit ? "text-success fw-medium" : "text-muted"}>
+                                <i className={`bi ${hasDigit ? "bi-check-circle-fill text-success" : "bi-circle text-secondary"} me-2`} />
+                                At least one digit (0–9)
+                            </span>
+                            <span className={hasSpecial ? "text-success fw-medium" : "text-muted"}>
+                                <i className={`bi ${hasSpecial ? "bi-check-circle-fill text-success" : "bi-circle text-secondary"} me-2`} />
+                                At least one special character (!@#$%^&* etc.)
+                            </span>
+                        </div>
+                    </div>
+                )}
 
                 <Field
                     id="confirm"
@@ -262,7 +318,7 @@ export default function Register() {
                     id="registrationNo"
                     name="registrationNo"
                     label="Vehicle Registration Number"
-                    placeholder="e.g. KA25AB1234"
+                    placeholder="e.g. KA25AB1234 or 24BH1234AA"
                     value={form.registrationNo}
                     onChange={change}
                     error={errors.registrationNo}

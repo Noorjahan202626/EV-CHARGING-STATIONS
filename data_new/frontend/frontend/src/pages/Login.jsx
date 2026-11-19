@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthLayout from "../components/Auth/AuthLayout";
 import Field from "../components/Auth/Field";
+import { validateEmail } from "../utils/authValidation";
 
 export default function Login() {
     const navigate = useNavigate();
@@ -23,7 +24,10 @@ export default function Login() {
         setSuccessMessage("");
 
         const err = {};
-        if (!/^\S+@\S+\.\S+$/.test(form.email)) err.email = "Enter a valid email address.";
+        const emailCheck = validateEmail(form.email);
+        if (!emailCheck.valid) {
+            err.email = emailCheck.error;
+        }
         if (!form.password) err.password = "Password is required.";
         setErrors(err);
         if (Object.keys(err).length) return;
@@ -34,7 +38,7 @@ export default function Login() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    email: form.email.trim(),
+                    email: emailCheck.normalized || form.email.trim().toLowerCase(),
                     password: form.password
                 })
             });
